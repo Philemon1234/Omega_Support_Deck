@@ -1,0 +1,33 @@
+{
+  "name": "omega-support-deck",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:full": "concurrently -k -n BACKEND,FRONTEND -c green,cyan \"npm --prefix backend run dev\" \"vite\"",
+    "build": "tsc --noEmit && vite build",
+    "build:all": "npm run build && npm --prefix backend run build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "papaparse": "^5.5.4",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-icons": "latest",
+    "react-router-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "latest",
+    "concurrently": "^10.0.3",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest"
+  }
+}
