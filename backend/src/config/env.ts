@@ -14,15 +14,22 @@ function normalizeUgSmsSenderId(value?: string) {
   return senderId || "OMEGAWIFI";
 }
 
+function normalizeOrigin(value: string) {
+  return value.replace(/\/$/, "");
+}
+
+const frontendUrl = normalizeOrigin(process.env.FRONTEND_URL || "http://localhost:5173");
+
 export const env = {
-  port: Number(process.env.PORT ?? 5000),
+  port: Number(process.env.PORT || 5000),
   smsProvider: process.env.SMS_PROVIDER ?? "ug_sms",
   smsMock: String(process.env.SMS_MOCK ?? "true").toLowerCase() === "true",
   ugSmsApiKey: process.env.UGSMS_API_KEY,
   ugSmsApiUrl: process.env.UGSMS_API_URL ?? process.env.UGSMS_BASE_URL ?? "https://ugsms.com/api/v2/sms/send",
   ugSmsSenderId: normalizeUgSmsSenderId(process.env.UGSMS_SENDER_ID),
   ugSmsTimeoutMs: Number(process.env.UGSMS_TIMEOUT_MS ?? 15000),
-  frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:5173",
+  frontendUrl,
+  allowedOrigins: Array.from(new Set([frontendUrl, "http://localhost:5173"])),
 };
 
 export function validateSmsEnvForRealSending() {

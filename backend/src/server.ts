@@ -9,11 +9,11 @@ import { startSmsScheduler } from "./services/smsScheduler.js";
 const app = express();
 
 app.disable("x-powered-by");
-app.use(cors({ origin: env.frontendUrl }));
+app.use(cors({ origin: env.allowedOrigins }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (_req, res) => {
-  res.json({ success: true, service: "Omega Support Deck API" });
+  res.json({ success: true, message: "Omega Support Deck API is running" });
 });
 
 app.use("/api/customers", customerRoutes);
