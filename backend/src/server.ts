@@ -8,6 +8,7 @@ import { startSmsScheduler } from "./services/smsScheduler.js";
 
 const app = express();
 
+app.disable("x-powered-by");
 app.use(cors({ origin: env.frontendUrl }));
 app.use(express.json({ limit: "1mb" }));
 

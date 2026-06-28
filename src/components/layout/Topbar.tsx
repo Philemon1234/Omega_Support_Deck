@@ -18,7 +18,7 @@ export function Topbar({ search, setSearch, placeholder }: TopbarProps) {
           className="h-14 w-full rounded-xl border border-slate-200 bg-white pl-[52px] pr-16 text-sm font-medium text-slate-700 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-green-500 focus:ring-4 focus:ring-green-100"
         />
         <span className="absolute right-4 top-1/2 hidden -translate-y-1/2 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 sm:block">
-          ⌘ K
+          Ctrl K
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-3">
