@@ -1,5 +1,12 @@
 import type { Request, Response } from "express";
-import { nextId, readStore, writeStore } from "../config/db.js";
+import {
+  DuplicatePhoneError,
+  createCustomer,
+  deleteCustomerRecord,
+  importCustomerRows,
+  listCustomers,
+  updateCustomerRecord,
+} from "../config/db.js";
 import { normalizeUgandanPhoneNumber } from "../utils/phone.js";
 
 function serializeCustomer(customer: { id: number; name: string; phoneNumber: string; createdAt: string; updatedAt: string }) {
@@ -12,16 +19,14 @@ function serializeCustomer(customer: { id: number; name: string; phoneNumber: st
   };
 }
 
-export function getCustomers(req: Request, res: Response) {
+export async function getCustomers(req: Request, res: Response) {
   const search = String(req.query.search ?? "").trim().toLowerCase();
-  const customers = readStore().customers
-    .filter((customer) => !search || customer.name.toLowerCase().includes(search) || customer.phoneNumber.toLowerCase().includes(search))
-    .map(serializeCustomer);
+  const customers = (await listCustomers(search)).map(serializeCustomer);
 
   res.json({ success: true, data: customers });
 }
 
-export function addCustomer(req: Request, res: Response) {
+export async function addCustomer(req: Request, res: Response) {
   const name = String(req.body.name ?? "").trim();
   const rawPhone = String(req.body.phoneNumber ?? req.body.phone ?? "").trim();
   if (!name) return res.status(400).json({ success: false, message: "Customer name is required." });
@@ -30,19 +35,45 @@ export function addCustomer(req: Request, res: Response) {
   const phoneNumber = normalizeUgandanPhoneNumber(rawPhone);
   if (!phoneNumber) return res.status(400).json({ success: false, message: "Please enter a valid Ugandan phone number." });
 
-  const store = readStore();
-  if (store.customers.some((customer) => customer.phoneNumber === phoneNumber)) {
-    return res.status(409).json({ success: false, message: "This phone number is already registered in the system." });
+  try {
+    const customer = await createCustomer({ name, phoneNumber });
+    res.status(201).json({ success: true, data: serializeCustomer(customer) });
+  } catch (error) {
+    if (error instanceof DuplicatePhoneError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    throw error;
   }
-
-  const timestamp = new Date().toISOString();
-  const customer = { id: nextId(store.customers), name, phoneNumber, createdAt: timestamp, updatedAt: timestamp };
-  store.customers.unshift(customer);
-  writeStore(store);
-  res.status(201).json({ success: true, data: serializeCustomer(customer) });
 }
 
-export function updateCustomer(req: Request, res: Response) {
+export async function importCustomers(req: Request, res: Response) {
+  const rows = (Array.isArray(req.body.customers) ? req.body.customers : []) as Array<{ name?: unknown; phoneNumber?: unknown; phone?: unknown } | null>;
+  let invalid = 0;
+  const validRows: Array<{ name: string; phoneNumber: string }> = [];
+
+  rows.forEach((row) => {
+    const name = String(row?.name ?? "").trim();
+    const phoneNumber = normalizeUgandanPhoneNumber(String(row?.phoneNumber ?? row?.phone ?? ""));
+    if (!name || !phoneNumber) {
+      invalid += 1;
+      return;
+    }
+    validRows.push({ name, phoneNumber });
+  });
+
+  const summary = await importCustomerRows(validRows);
+  res.status(201).json({
+    success: true,
+    data: {
+      added: summary.added,
+      duplicates: summary.duplicates,
+      invalid,
+      duplicatePhones: Array.from(new Set(summary.duplicatePhones)),
+    },
+  });
+}
+
+export async function updateCustomer(req: Request, res: Response) {
   const id = Number(req.params.id);
   const name = String(req.body.name ?? "").trim();
   const rawPhone = String(req.body.phoneNumber ?? req.body.phone ?? "").trim();
@@ -52,26 +83,21 @@ export function updateCustomer(req: Request, res: Response) {
   const phoneNumber = normalizeUgandanPhoneNumber(rawPhone);
   if (!phoneNumber) return res.status(400).json({ success: false, message: "Please enter a valid Ugandan phone number." });
 
-  const store = readStore();
-  const customer = store.customers.find((item) => item.id === id);
-  if (!customer) return res.status(404).json({ success: false, message: "Customer not found." });
-  if (store.customers.some((item) => item.id !== id && item.phoneNumber === phoneNumber)) {
-    return res.status(409).json({ success: false, message: "This phone number is already registered in the system." });
+  try {
+    const customer = await updateCustomerRecord(id, { name, phoneNumber });
+    if (!customer) return res.status(404).json({ success: false, message: "Customer not found." });
+    res.json({ success: true, data: serializeCustomer(customer) });
+  } catch (error) {
+    if (error instanceof DuplicatePhoneError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    throw error;
   }
-
-  customer.name = name;
-  customer.phoneNumber = phoneNumber;
-  customer.updatedAt = new Date().toISOString();
-  writeStore(store);
-  res.json({ success: true, data: serializeCustomer(customer) });
 }
 
-export function deleteCustomer(req: Request, res: Response) {
+export async function deleteCustomer(req: Request, res: Response) {
   const id = Number(req.params.id);
-  const store = readStore();
-  const initialLength = store.customers.length;
-  store.customers = store.customers.filter((customer) => customer.id !== id);
-  if (store.customers.length === initialLength) return res.status(404).json({ success: false, message: "Customer not found." });
-  writeStore(store);
+  const deleted = await deleteCustomerRecord(id);
+  if (!deleted) return res.status(404).json({ success: false, message: "Customer not found." });
   res.json({ success: true });
 }

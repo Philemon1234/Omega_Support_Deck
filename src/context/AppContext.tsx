@@ -22,6 +22,7 @@ export type SmsActivity = {
 type AddCustomerResult = { ok: true } | { ok: false; error: string };
 type UpdateCustomerResult = { ok: true } | { ok: false; error: string };
 type SmsResult = { ok: true; message: string } | { ok: false; error: string };
+type TemplateResult = { ok: true } | { ok: false; error: string };
 
 export type SmsTemplate = {
   id: string;
@@ -49,6 +50,7 @@ type AppContextValue = {
   refreshCustomers: (search?: string) => Promise<void>;
   refreshSmsHistory: () => Promise<void>;
   refreshDashboardStats: () => Promise<void>;
+  refreshTemplates: () => Promise<void>;
   addCustomer: (name: string, phone: string) => Promise<AddCustomerResult>;
   importCustomers: (rows: Array<ImportedCustomerRow | null>) => Promise<ImportCustomersSummary>;
   deleteCustomer: (id: number) => Promise<void>;
@@ -58,60 +60,12 @@ type AppContextValue = {
   sendSmsNow: (message: string, recipientType: "all" | "single" | "selected", customerId?: number, customerIds?: number[]) => Promise<SmsResult>;
   sendTestSms: (phoneNumber: string, message: string) => Promise<SmsResult>;
   scheduleSms: (message: string, recipientType: "all" | "single" | "selected", scheduledAt: string, customerId?: number, customerIds?: number[]) => Promise<SmsResult>;
-  addTemplate: (template: Omit<SmsTemplate, "id" | "createdAt">) => { ok: true } | { ok: false; error: string };
-  updateTemplate: (id: string, template: Omit<SmsTemplate, "id" | "createdAt">) => { ok: true } | { ok: false; error: string };
-  deleteTemplate: (id: string) => void;
+  addTemplate: (template: Omit<SmsTemplate, "id" | "createdAt">) => Promise<TemplateResult>;
+  updateTemplate: (id: string, template: Omit<SmsTemplate, "id" | "createdAt">) => Promise<TemplateResult>;
+  deleteTemplate: (id: string) => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
-const TEMPLATE_KEY = "omega_sms_templates";
-
-const defaultTemplates: SmsTemplate[] = [
-  {
-    id: "maintenance-notice",
-    title: "Maintenance Notice",
-    category: "maintenance",
-    message: "Dear customer, our Wi-Fi service will be under maintenance on [DATE] from [START_TIME] to [END_TIME]. Please plan ahead. Thank you.",
-    createdAt: new Date("2026-01-01T08:00:00.000Z").toISOString(),
-  },
-  {
-    id: "service-restored",
-    title: "Service Restored",
-    category: "service",
-    message: "Dear customer, Omega Wi-Fi service has been restored. Thank you for your patience.",
-    createdAt: new Date("2026-01-01T08:05:00.000Z").toISOString(),
-  },
-  {
-    id: "weekend-offer",
-    title: "Weekend Offer",
-    category: "offer",
-    message: "Dear customer, enjoy our weekend Wi-Fi offer. Get [OFFER_DETAILS]. Valid until [DATE].",
-    createdAt: new Date("2026-01-01T08:10:00.000Z").toISOString(),
-  },
-  {
-    id: "payment-reminder",
-    title: "Payment Reminder",
-    category: "payment",
-    message: "Dear customer, your Wi-Fi package is about to expire. Please renew to continue enjoying Omega Wi-Fi.",
-    createdAt: new Date("2026-01-01T08:15:00.000Z").toISOString(),
-  },
-  {
-    id: "general-announcement",
-    title: "General Announcement",
-    category: "general",
-    message: "Dear customer, we have an important update from Omega Wi-Fi: [MESSAGE]",
-    createdAt: new Date("2026-01-01T08:20:00.000Z").toISOString(),
-  },
-];
-
-function loadTemplates() {
-  try {
-    const stored = localStorage.getItem(TEMPLATE_KEY);
-    return stored ? (JSON.parse(stored) as SmsTemplate[]) : defaultTemplates;
-  } catch {
-    return defaultTemplates;
-  }
-}
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -152,6 +106,16 @@ function mapSms(message: api.ApiSmsMessage): SmsActivity {
   };
 }
 
+function mapTemplate(template: api.ApiSmsTemplate): SmsTemplate {
+  return {
+    id: template.id,
+    title: template.title,
+    category: template.category,
+    message: template.message,
+    createdAt: template.createdAt,
+  };
+}
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Request failed.";
 }
@@ -167,12 +131,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [smsTemplates, setSmsTemplates] = useState<SmsTemplate[]>(loadTemplates);
+  const [smsTemplates, setSmsTemplates] = useState<SmsTemplate[]>([]);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<number[]>([]);
-
-  useEffect(() => {
-    localStorage.setItem(TEMPLATE_KEY, JSON.stringify(smsTemplates));
-  }, [smsTemplates]);
 
   const refreshCustomers = useCallback(async (search?: string) => {
     try {
@@ -209,9 +169,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshTemplates = useCallback(async () => {
+    try {
+      const data = await api.fetchTemplates();
+      setSmsTemplates(data.map(mapTemplate));
+      setApiError(null);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setApiError(message);
+      throw error;
+    }
+  }, []);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([refreshCustomers(), refreshSmsHistory(), refreshDashboardStats()]);
-  }, [refreshCustomers, refreshDashboardStats, refreshSmsHistory]);
+    await Promise.all([refreshCustomers(), refreshSmsHistory(), refreshDashboardStats(), refreshTemplates()]);
+  }, [refreshCustomers, refreshDashboardStats, refreshSmsHistory, refreshTemplates]);
 
   useEffect(() => {
     refreshAll()
@@ -230,39 +202,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const importCustomers = async (rows: Array<ImportedCustomerRow | null>): Promise<ImportCustomersSummary> => {
-    const existingPhones = new Set(customers.map((customer) => customer.phone));
-    const seenPhones = new Set<string>();
-    const duplicatePhones: string[] = [];
-    let invalid = 0;
-    let added = 0;
-
-    for (const row of rows) {
-      if (!row) {
-        invalid += 1;
-        continue;
-      }
-
-      if (existingPhones.has(row.phone) || seenPhones.has(row.phone)) {
-        duplicatePhones.push(row.phone);
-        continue;
-      }
-
-      seenPhones.add(row.phone);
-      try {
-        await api.addCustomer({ name: row.name, phoneNumber: row.phone });
-        added += 1;
-      } catch (error) {
-        const message = getErrorMessage(error);
-        if (message.includes("already registered")) {
-          duplicatePhones.push(row.phone);
-        } else {
-          invalid += 1;
-        }
-      }
-    }
-
+    const summary = await api.importCustomers(rows.map((row) => (row ? { name: row.name, phoneNumber: row.phone } : null)));
     await Promise.all([refreshCustomers(), refreshDashboardStats()]);
-    return { added, duplicates: duplicatePhones.length, invalid, duplicatePhones: Array.from(new Set(duplicatePhones)) };
+    return summary;
   };
 
   const deleteCustomer = async (id: number) => {
@@ -320,42 +262,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const addTemplate = (template: Omit<SmsTemplate, "id" | "createdAt">) => {
+  const addTemplate = async (template: Omit<SmsTemplate, "id" | "createdAt">): Promise<TemplateResult> => {
     if (!template.title.trim()) return { ok: false as const, error: "Template title is required." };
     if (!template.message.trim()) return { ok: false as const, error: "Template message is required." };
-    setSmsTemplates((current) => [
-      {
-        ...template,
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        title: template.title.trim(),
-        message: template.message.trim(),
-        createdAt: new Date().toISOString(),
-      },
-      ...current,
-    ]);
-    return { ok: true as const };
+    try {
+      await api.addTemplate({ ...template, title: template.title.trim(), message: template.message.trim() });
+      await refreshTemplates();
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: getErrorMessage(error) };
+    }
   };
 
-  const updateTemplate = (id: string, template: Omit<SmsTemplate, "id" | "createdAt">) => {
+  const updateTemplate = async (id: string, template: Omit<SmsTemplate, "id" | "createdAt">): Promise<TemplateResult> => {
     if (!template.title.trim()) return { ok: false as const, error: "Template title is required." };
     if (!template.message.trim()) return { ok: false as const, error: "Template message is required." };
-    setSmsTemplates((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              title: template.title.trim(),
-              category: template.category,
-              message: template.message.trim(),
-            }
-          : item,
-      ),
-    );
-    return { ok: true as const };
+    try {
+      await api.updateTemplate(id, { ...template, title: template.title.trim(), message: template.message.trim() });
+      await refreshTemplates();
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, error: getErrorMessage(error) };
+    }
   };
 
-  const deleteTemplate = (id: string) => {
-    setSmsTemplates((current) => current.filter((template) => template.id !== id));
+  const deleteTemplate = async (id: string) => {
+    await api.deleteTemplate(id);
+    await refreshTemplates();
   };
 
   const value = useMemo(
@@ -370,6 +303,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       refreshCustomers,
       refreshSmsHistory,
       refreshDashboardStats,
+      refreshTemplates,
       addCustomer,
       importCustomers,
       deleteCustomer,
@@ -383,7 +317,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateTemplate,
       deleteTemplate,
     }),
-    [apiError, customers, dashboardStats, isLoading, refreshCustomers, refreshDashboardStats, refreshSmsHistory, selectedCustomerIds, smsActivities, smsTemplates],
+    [apiError, customers, dashboardStats, isLoading, refreshCustomers, refreshDashboardStats, refreshSmsHistory, refreshTemplates, selectedCustomerIds, smsActivities, smsTemplates],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

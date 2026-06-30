@@ -1,20 +1,18 @@
 import type { Request, Response } from "express";
-import { readStore, type CustomerRecord, type RecipientType } from "../config/db.js";
+import { getCustomersByIds, listCustomers, type CustomerRecord, type RecipientType, type SmsMessageRecord } from "../config/db.js";
 import { createSmsLog, cancelScheduledSms, listSmsHistory } from "../services/smsLogService.js";
 import { sendSmsViaUgSms } from "../services/ugSmsService.js";
 import { isFutureDate, toIsoOrNull } from "../utils/date.js";
 import { normalizeUgandanPhoneNumber } from "../utils/phone.js";
 
-function resolveRecipients(recipientType: RecipientType, customerId?: number, customerIds?: number[]) {
-  const store = readStore();
+async function resolveRecipients(recipientType: RecipientType, customerId?: number, customerIds?: number[]) {
   if (recipientType === "single") {
-    return customerId ? store.customers.filter((customer) => customer.id === customerId) : [];
+    return customerId ? getCustomersByIds([customerId]) : [];
   }
   if (recipientType === "selected") {
-    const selectedIds = new Set(customerIds ?? []);
-    return store.customers.filter((customer) => selectedIds.has(customer.id));
+    return getCustomersByIds(customerIds ?? []);
   }
-  return store.customers;
+  return listCustomers();
 }
 
 function getRecipientRequest(body: Request["body"]): { recipientType: "all" | "single" | "selected"; customerId?: number; customerIds?: number[]; error?: string } {
@@ -36,7 +34,7 @@ function getRecipientRequest(body: Request["body"]): { recipientType: "all" | "s
   return { recipientType: "all" };
 }
 
-function serializeSms(message: ReturnType<typeof listSmsHistory>[number]) {
+function serializeSms(message: SmsMessageRecord) {
   return {
     id: message.id,
     messageBody: message.messageBody,
@@ -58,12 +56,12 @@ export async function sendSms(req: Request, res: Response) {
   const messageBody = String(req.body.messageBody ?? "").trim();
   if (!messageBody) return res.status(400).json({ success: false, message: "SMS message is required." });
 
-  const recipients = resolveRecipients(recipientType, customerId, customerIds);
+  const recipients = await resolveRecipients(recipientType, customerId, customerIds);
   if (!recipients.length) return res.status(400).json({ success: false, message: "No recipients found." });
 
   const result = await sendSmsViaUgSms({ numbers: recipients.map((customer) => customer.phoneNumber), message: messageBody });
   const status = result.success ? "sent" : "failed";
-  const sms = createSmsLog({
+  const sms = await createSmsLog({
     messageBody,
     sendType: "immediate",
     recipientType,
@@ -89,7 +87,7 @@ export async function sendSms(req: Request, res: Response) {
   });
 }
 
-export function scheduleSms(req: Request, res: Response) {
+export async function scheduleSms(req: Request, res: Response) {
   const recipientRequest = getRecipientRequest(req.body);
   if (recipientRequest.error) return res.status(400).json({ success: false, message: recipientRequest.error });
   const { recipientType, customerId, customerIds } = recipientRequest;
@@ -99,10 +97,10 @@ export function scheduleSms(req: Request, res: Response) {
   if (!messageBody) return res.status(400).json({ success: false, message: "SMS message is required." });
   if (!scheduledAt || !isFutureDate(scheduledAt)) return res.status(400).json({ success: false, message: "Scheduled time must be in the future." });
 
-  const recipients = resolveRecipients(recipientType, customerId, customerIds);
+  const recipients = await resolveRecipients(recipientType, customerId, customerIds);
   if (!recipients.length) return res.status(400).json({ success: false, message: "No recipients found." });
 
-  const sms = createSmsLog({
+  const sms = await createSmsLog({
     messageBody,
     sendType: "scheduled",
     recipientType,
@@ -118,12 +116,12 @@ export function scheduleSms(req: Request, res: Response) {
   res.status(201).json({ success: true, message: "SMS scheduled successfully.", data: { smsId: sms.id, status: "scheduled", recipientsCount: recipients.length } });
 }
 
-export function getSmsHistory(_req: Request, res: Response) {
-  res.json({ success: true, data: listSmsHistory().map(serializeSms) });
+export async function getSmsHistory(_req: Request, res: Response) {
+  res.json({ success: true, data: (await listSmsHistory()).map(serializeSms) });
 }
 
-export function cancelSms(req: Request, res: Response) {
-  const result = cancelScheduledSms(Number(req.params.id));
+export async function cancelSms(req: Request, res: Response) {
+  const result = await cancelScheduledSms(Number(req.params.id));
   if (!result.ok) return res.status(400).json({ success: false, message: result.message });
   res.json({ success: true, message: "Scheduled SMS cancelled.", data: result.message });
 }
@@ -137,7 +135,7 @@ export async function sendTestSms(req: Request, res: Response) {
   const testRecipient: CustomerRecord = { id: 0, name: "Test Recipient", phoneNumber, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const result = await sendSmsViaUgSms({ numbers: [phoneNumber], message: messageBody });
   const status = result.success ? "sent" : "failed";
-  const sms = createSmsLog({
+  const sms = await createSmsLog({
     messageBody,
     sendType: "test",
     recipientType: "test",

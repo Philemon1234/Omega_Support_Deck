@@ -4,6 +4,7 @@ import { env } from "./config/env.js";
 import { customerRoutes } from "./routes/customerRoutes.js";
 import { dashboardRoutes } from "./routes/dashboardRoutes.js";
 import { smsRoutes } from "./routes/smsRoutes.js";
+import { templateRoutes } from "./routes/templateRoutes.js";
 import { startSmsScheduler } from "./services/smsScheduler.js";
 
 const app = express();
@@ -19,6 +20,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/customers", customerRoutes);
 app.use("/api/sms", smsRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/templates", templateRoutes);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err instanceof Error ? err.message : err);

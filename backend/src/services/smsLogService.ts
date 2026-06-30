@@ -1,4 +1,13 @@
-import { nextId, readStore, writeStore, type CustomerRecord, type RecipientType, type SmsMessageRecord, type SmsRecipientRecord, type SmsStatus } from "../config/db.js";
+import {
+  createSmsMessage,
+  createSmsRecipients,
+  getSmsMessageById,
+  listSmsMessages,
+  updateSmsMessage,
+  type CustomerRecord,
+  type RecipientType,
+  type SmsStatus,
+} from "../config/db.js";
 
 export type CreateSmsLogParams = {
   messageBody: string;
@@ -16,11 +25,8 @@ export type CreateSmsLogParams = {
   recipients: Array<{ customer?: CustomerRecord | null; phoneNumber: string; status: SmsStatus; errorMessage?: string | null }>;
 };
 
-export function createSmsLog(params: CreateSmsLogParams) {
-  const store = readStore();
-  const createdAt = new Date().toISOString();
-  const message: SmsMessageRecord = {
-    id: nextId(store.smsMessages),
+export async function createSmsLog(params: CreateSmsLogParams) {
+  const message = await createSmsMessage({
     messageBody: params.messageBody,
     sendType: params.sendType,
     recipientType: params.recipientType,
@@ -31,39 +37,29 @@ export function createSmsLog(params: CreateSmsLogParams) {
     invalidRecipients: params.invalidRecipients,
     scheduledAt: params.scheduledAt ?? null,
     sentAt: params.sentAt ?? null,
-    provider: "UGSMS",
     providerResponse: params.providerResponse ?? null,
     errorMessage: params.errorMessage ?? null,
-    createdAt,
-  };
+  });
 
-  const nextRecipientId = nextId(store.smsRecipients);
-  const recipients: SmsRecipientRecord[] = params.recipients.map((recipient, index) => ({
-    id: nextRecipientId + index,
+  await createSmsRecipients(params.recipients.map((recipient) => ({
     smsMessageId: message.id,
     customerId: recipient.customer?.id ?? null,
     phoneNumber: recipient.phoneNumber,
     status: recipient.status,
     errorMessage: recipient.errorMessage ?? null,
-    createdAt,
-  }));
+  })));
 
-  store.smsMessages.unshift(message);
-  store.smsRecipients.unshift(...recipients);
-  writeStore(store);
   return message;
 }
 
 export function listSmsHistory(limit = 50) {
-  return readStore().smsMessages.slice(0, limit);
+  return listSmsMessages(limit);
 }
 
-export function cancelScheduledSms(id: number) {
-  const store = readStore();
-  const message = store.smsMessages.find((sms) => sms.id === id);
+export async function cancelScheduledSms(id: number) {
+  const message = await getSmsMessageById(id);
   if (!message) return { ok: false, message: "SMS record not found." };
   if (message.status !== "scheduled") return { ok: false, message: "Only scheduled SMS messages can be cancelled." };
-  message.status = "cancelled";
-  writeStore(store);
-  return { ok: true, message };
+  const updatedMessage = await updateSmsMessage(id, { status: "cancelled" });
+  return { ok: true, message: updatedMessage };
 }

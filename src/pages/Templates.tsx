@@ -26,6 +26,7 @@ export function Templates() {
   const [message, setMessage] = useState("");
   const [editingTemplate, setEditingTemplate] = useState<SmsTemplate | null>(null);
   const [alert, setAlert] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const filteredTemplates = useMemo(() => {
     const query = search.toLowerCase().trim();
@@ -42,10 +43,12 @@ export function Templates() {
     setEditingTemplate(null);
   };
 
-  const saveTemplate = () => {
+  const saveTemplate = async () => {
+    setIsSaving(true);
     const result = editingTemplate
-      ? updateTemplate(editingTemplate.id, { title, category, message })
-      : addTemplate({ title, category, message });
+      ? await updateTemplate(editingTemplate.id, { title, category, message })
+      : await addTemplate({ title, category, message });
+    setIsSaving(false);
     if (!result.ok) {
       setAlert(result.error);
       return;
@@ -64,8 +67,13 @@ export function Templates() {
 
   const removeTemplate = (template: SmsTemplate) => {
     if (window.confirm("Are you sure you want to delete this template?")) {
-      deleteTemplate(template.id);
-      if (editingTemplate?.id === template.id) resetForm();
+      deleteTemplate(template.id)
+        .then(() => {
+          if (editingTemplate?.id === template.id) resetForm();
+        })
+        .catch((error) => {
+          setAlert(error instanceof Error ? error.message : "Unable to delete template.");
+        });
     }
   };
 
@@ -143,8 +151,8 @@ export function Templates() {
               <span className="mb-2 block text-sm font-medium text-slate-900">Message</span>
               <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={6} placeholder="Template message" />
             </label>
-            <Button className="w-full py-4" onClick={saveTemplate}>
-              Save Template
+            <Button className="w-full py-4" onClick={saveTemplate} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save Template"}
             </Button>
           </div>
         </Card>

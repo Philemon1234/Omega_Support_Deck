@@ -30,6 +30,21 @@ export type DashboardStats = {
   failedSms: number;
 };
 
+export type ApiSmsTemplate = {
+  id: string;
+  title: string;
+  category: "maintenance" | "offer" | "service" | "payment" | "general";
+  message: string;
+  createdAt: string;
+};
+
+export type ImportCustomersResponse = {
+  added: number;
+  duplicates: number;
+  invalid: number;
+  duplicatePhones: string[];
+};
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
@@ -61,6 +76,14 @@ export async function addCustomer(payload: { name: string; phoneNumber: string }
   const response = await request<{ success: true; data: ApiCustomer }>("/customers", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+  return response.data;
+}
+
+export async function importCustomers(customers: Array<{ name?: string; phoneNumber?: string; phone?: string } | null>) {
+  const response = await request<{ success: true; data: ImportCustomersResponse }>("/customers/import", {
+    method: "POST",
+    body: JSON.stringify({ customers }),
   });
   return response.data;
 }
@@ -110,4 +133,29 @@ export async function sendTestSms(payload: { phoneNumber: string; messageBody: s
 export async function fetchDashboardStats() {
   const response = await request<{ success: true; data: DashboardStats }>("/dashboard/stats");
   return response.data;
+}
+
+export async function fetchTemplates() {
+  const response = await request<{ success: true; data: ApiSmsTemplate[] }>("/templates");
+  return response.data;
+}
+
+export async function addTemplate(payload: Omit<ApiSmsTemplate, "id" | "createdAt">) {
+  const response = await request<{ success: true; data: ApiSmsTemplate }>("/templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return response.data;
+}
+
+export async function updateTemplate(id: string, payload: Omit<ApiSmsTemplate, "id" | "createdAt">) {
+  const response = await request<{ success: true; data: ApiSmsTemplate }>(`/templates/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return response.data;
+}
+
+export async function deleteTemplate(id: string) {
+  await request<{ success: true }>(`/templates/${id}`, { method: "DELETE" });
 }
